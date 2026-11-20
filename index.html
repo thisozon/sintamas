@@ -1308,9 +1308,14 @@
         if (!raw) return false;
         const cache = JSON.parse(raw);
         if (Array.isArray(cache.items) && cache.items.length > 0) appState.items = cache.items;
-        if (Array.isArray(cache.loans)) appState.loans = cache.loans;
-        if (Array.isArray(cache.maintenance)) appState.maintenance = cache.maintenance;
-        if (Array.isArray(cache.users) && cache.users.length > 0) appState.users = cache.users;
+        if (Array.isArray(cache.loans) && cache.loans.length > 0) appState.loans = cache.loans;
+        if (Array.isArray(cache.maintenance) && cache.maintenance.length > 0) appState.maintenance = cache.maintenance;
+        if (Array.isArray(cache.users) && cache.users.length > 0) {
+          const map = new Map();
+          BOOTSTRAP_USERS.forEach(u => map.set(u.username, u));
+          cache.users.forEach(u => map.set(u.username, u));
+          appState.users = Array.from(map.values());
+        }
         if (cache.settings && typeof cache.settings === 'object') {
           appState.settings = { ...DEFAULT_SETTINGS, ...cache.settings };
         }
@@ -1340,7 +1345,43 @@
       }));
     }
 
+    // Menggabungkan data server dan lokal secara cerdas agar tidak saling menimpa antar user
+    function mergeEntityList(serverList, localList, entityKey, operation, record) {
+      const map = new Map();
+
+      // 1. Masukkan semua data yang ada di server
+      if (Array.isArray(serverList)) {
+        serverList.forEach(item => {
+          if (item && item.id) map.set(String(item.id), { ...item });
+        });
+      }
+
+      // 2. Gabungkan data lokal yang belum ada di server
+      if (Array.isArray(localList)) {
+        localList.forEach(item => {
+          if (item && item.id) {
+            const existing = map.get(String(item.id)) || {};
+            map.set(String(item.id), { ...existing, ...item });
+          }
+        });
+      }
+
+      // 3. Terapkan operasi aktif spesifik (tambah/edit/hapus)
+      if (record && record.id) {
+        const targetId = String(record.id);
+        if (operation === 'delete') {
+          map.delete(targetId);
+        } else if (operation === 'create' || operation === 'update') {
+          const existing = map.get(targetId) || {};
+          map.set(targetId, { ...existing, ...record });
+        }
+      }
+
+      return Array.from(map.values());
+    }
+
     async function syncFromGAS(silent = false) {
+      if (appState.isSyncing) return;
       appState.isSyncing = true;
       updateSyncUI('loading', 'Menarik data GAS...');
       try {
@@ -1358,14 +1399,34 @@
         }
         const data = extractPayloadData(raw);
 
-        if (Array.isArray(data.items)) appState.items = normalizeRecordIds(data.items, 'ITM');
-        if (Array.isArray(data.loans)) appState.loans = normalizeRecordIds(data.loans, 'LOAN');
-        if (Array.isArray(data.maintenance)) appState.maintenance = normalizeRecordIds(data.maintenance, 'MNT');
+        // Pertahankan barang: jika server ada barang, pakai server; jika server kosong tapi lokal punya, pulihkan ke server!
+        if (Array.isArray(data.items)) {
+          if (data.items.length > 0) {
+            appState.items = normalizeRecordIds(data.items, 'ITM');
+          } else if (appState.items.length > 0) {
+            pushToGAS('items', 'restore');
+          }
+        }
+        if (Array.isArray(data.loans)) {
+          if (data.loans.length > 0) {
+            appState.loans = normalizeRecordIds(data.loans, 'LOAN');
+          } else if (appState.loans.length > 0) {
+            pushToGAS('loans', 'restore');
+          }
+        }
+        if (Array.isArray(data.maintenance)) {
+          if (data.maintenance.length > 0) {
+            appState.maintenance = normalizeRecordIds(data.maintenance, 'MNT');
+          } else if (appState.maintenance.length > 0) {
+            pushToGAS('maintenance', 'restore');
+          }
+        }
         if (Array.isArray(data.users) && data.users.length > 0) {
-          appState.users = normalizeRecordIds(data.users, 'USR');
+          const mergedUsers = mergeEntityList(data.users, BOOTSTRAP_USERS);
+          appState.users = normalizeRecordIds(mergedUsers, 'USR');
         }
         if (data.settings && typeof data.settings === 'object') {
-          appState.settings = { ...DEFAULT_SETTINGS, ...data.settings };
+          appState.settings = { ...DEFAULT_SETTINGS, ...appState.settings, ...data.settings };
         }
 
         saveStateToLocalCache();
@@ -1384,11 +1445,47 @@
       }
     }
 
-    // Use text/plain so Google Apps Script web apps accept POST without a CORS preflight failure.
+    // Mengirim perubahan ke Google Apps Script dengan penggabungan data agar tidak menghapus input user lain
     async function pushToGAS(entity, operation, record = null) {
       saveStateToLocalCache();
       updateSyncUI('loading', 'Menyimpan ke GAS...');
       try {
+        // Ambil data terbaru dari server terlebih dahulu untuk digabungkan
+        let serverData = {};
+        try {
+          const fetchUrl = `${GAS_WEB_APP_URL}?action=getAll&t=${Date.now()}`;
+          const res = await fetch(fetchUrl, { method: 'GET', redirect: 'follow' });
+          if (res.ok) {
+            const raw = JSON.parse(await res.text());
+            serverData = extractPayloadData(raw);
+          }
+        } catch (fetchErr) {
+          console.warn('Gagal fetch server sebelum push:', fetchErr);
+        }
+
+        // Lakukan penggabungan data (merge) untuk setiap tabel
+        const mergedItems = mergeEntityList(serverData.items, appState.items, 'items', entity === 'items' ? operation : null, entity === 'items' ? record : null);
+        const mergedLoans = mergeEntityList(serverData.loans, appState.loans, 'loans', entity === 'loans' ? operation : null, entity === 'loans' ? record : null);
+        const mergedMaint = mergeEntityList(serverData.maintenance, appState.maintenance, 'maintenance', entity === 'maintenance' ? operation : null, entity === 'maintenance' ? record : null);
+        const mergedUsers = mergeEntityList(serverData.users, appState.users, 'users', entity === 'users' ? operation : null, entity === 'users' ? record : null);
+        const finalUsers = mergedUsers.length > 0 ? mergedUsers : [...BOOTSTRAP_USERS];
+
+        const mergedSettings = {
+          ...DEFAULT_SETTINGS,
+          ...(serverData.settings || {}),
+          ...(appState.settings || {}),
+          ...(entity === 'settings' && record ? record : {})
+        };
+
+        // Perbarui state lokal dan cache
+        appState.items = normalizeRecordIds(mergedItems, 'ITM');
+        appState.loans = normalizeRecordIds(mergedLoans, 'LOAN');
+        appState.maintenance = normalizeRecordIds(mergedMaint, 'MNT');
+        appState.users = normalizeRecordIds(finalUsers, 'USR');
+        appState.settings = mergedSettings;
+        saveStateToLocalCache();
+        renderCurrentRoute();
+
         const body = JSON.stringify({
           action: 'syncAll',
           entity,
@@ -1418,7 +1515,7 @@
       } catch (err) {
         console.error('GAS POST Error:', err);
         updateSyncUI('error', `Gagal menyimpan ke server: ${err.message}`);
-        showToast('Perubahan tampil di layar, namun gagal terkirim ke GAS. Tekan Sinkron untuk mencoba lagi.', 'error');
+        showToast('Perubahan tersimpan di perangkat. Server GAS sedang offline.', 'error');
         return false;
       }
     }
@@ -2878,8 +2975,9 @@
       if (maintDateEl) maintDateEl.value = today;
 
       loadStateFromLocalCache();
-      await updatePwaManifestAndIcons();
-      await syncFromGAS(true);
+      updatePwaManifestAndIcons();
+      // Sinkronisasi latar belakang (non-blocking) agar halaman login tampil instan tanpa jeda
+      syncFromGAS(true);
 
       const savedSessionRaw = sessionStorage.getItem(SESSION_KEY);
       if (savedSessionRaw) {
@@ -2910,11 +3008,27 @@
           return;
         }
 
-        if (appState.isSyncing) {
-          await syncFromGAS(true);
+        // 1. Cek langsung ke akun lokal/cache untuk login instan 0 detik tanpa loading
+        let user = appState.users.find(u => u.username === username && String(u.password) === String(password));
+
+        // 2. Jika akun belum ada di lokal (misal baru dibuat di HP lain), verifikasi ke GAS
+        if (!user) {
+          const submitBtn = e.target.querySelector('button[type="submit"]');
+          const origText = submitBtn ? submitBtn.textContent : '';
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Memverifikasi akun ke server...';
+          }
+          try {
+            await syncFromGAS(true);
+          } catch (_) {}
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = origText;
+          }
+          user = appState.users.find(u => u.username === username && String(u.password) === String(password));
         }
 
-        const user = appState.users.find(u => u.username === username && String(u.password) === String(password));
         if (!user) {
           if (errBox) {
             errBox.textContent = 'Username atau password tidak sesuai. Silakan periksa kembali.';
@@ -2925,6 +3039,13 @@
 
         await enterAuthenticatedApp(user);
         showToast(`Selamat datang, ${user.nama}.`, 'success');
+      });
+
+      // Otomatis tarik data terbaru saat pengguna kembali membuka tab aplikasi
+      window.addEventListener('focus', () => {
+        if (appState.currentUser && !appState.isSyncing) {
+          syncFromGAS(true);
+        }
       });
 
       document.getElementById('btn-toggle-pass')?.addEventListener('click', () => {
