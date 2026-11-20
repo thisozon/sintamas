@@ -2766,6 +2766,21 @@
       previewEl.innerHTML = `<div class="w-24">${generateQrCodeSVG(codeVal, 92, true)}</div>`;
     }
 
+    // Kode barang tidak boleh diisi manual: selalu dicocokkan dengan prefix jenis.
+    function enforceKodeOtomatis() {
+      const jenisEl = document.getElementById('item-jenis');
+      const kodeInput = document.getElementById('item-kode');
+      const editIdVal = document.getElementById('item-edit-id')?.value;
+      if (!jenisEl || !kodeInput || editIdVal) return;
+
+      const prefix = KODE_PREFIX_MAP[jenisEl.value] || 'BRG';
+      const current = String(kodeInput.value || '').trim().toUpperCase();
+      if (!current.startsWith(prefix + '-')) {
+        kodeInput.value = generateNextItemKode(jenisEl.value);
+        updateFormBarcodePreview();
+      }
+    }
+
     function refreshKodeForJenis() {
       const jenisEl = document.getElementById('item-jenis');
       const kodeInput = document.getElementById('item-kode');
@@ -3948,7 +3963,13 @@
         if (kodeInput && !editIdVal) kodeInput.value = generateNextItemKode(e.target.value);
         updateFormBarcodePreview();
       });
-      document.getElementById('item-kode')?.addEventListener('input', updateFormBarcodePreview);
+      document.getElementById('item-kode')?.addEventListener('input', () => {
+        enforceKodeOtomatis();
+      });
+      document.getElementById('item-kode')?.addEventListener('blur', enforceKodeOtomatis);
+      document.getElementById('item-form')?.addEventListener('focusin', (e) => {
+        if (e.target && e.target.id === 'item-kode') enforceKodeOtomatis();
+      });
 
       document.getElementById('btn-cancel-edit-item')?.addEventListener('click', () => {
         const editIdEl = document.getElementById('item-edit-id');
