@@ -1,0 +1,6 @@
+# File yang tidak perlu masuk ke GitHub/Vercel
+*.docx
+*.docx
+referensi tema desain.jpg
+konfigurasi vercel.md
+code.js
