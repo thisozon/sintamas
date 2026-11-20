@@ -350,13 +350,17 @@
         <section id="view-barang" class="hidden space-y-5">
           <div class="bg-white rounded-2xl border border-[#D4E2E2] p-4 sm:p-5 space-y-4">
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div class="flex items-center gap-3">
+              <div class="flex flex-wrap items-center gap-2.5">
+                <button type="button" id="btn-daftar-add-item" data-nav="tambah" class="min-h-[42px] px-4 py-2 rounded-xl bg-[#0E4E4E] hover:bg-[#093838] text-white text-xs font-extrabold flex items-center gap-1.5 transition-colors shadow-xs">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  <span>+ Tambah Barang</span>
+                </button>
                 <label class="inline-flex items-center gap-2 min-h-[40px] px-2 text-xs font-bold text-[#122626]">
                   <input type="checkbox" id="check-all-items" class="w-4 h-4 rounded accent-[#0E4E4E]">
                   <span>Pilih Semua</span>
                 </label>
-                <button type="button" id="btn-print-selected-barcodes" class="min-h-[42px] px-4 py-2 rounded-xl bg-[#0E4E4E] hover:bg-[#093838] text-white text-xs font-extrabold">
-                  Cetak Barcode Terpilih (<span id="selected-barcode-count">0</span>)
+                <button type="button" id="btn-print-selected-barcodes" class="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#E5EFEF] hover:bg-[#d5e5e5] text-[#0E4E4E] text-xs font-extrabold">
+                  Cetak Barcode (<span id="selected-barcode-count">0</span>)
                 </button>
               </div>
 
@@ -845,7 +849,12 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label for="set-user-password" class="block text-[11px] font-bold text-[#122626] mb-1">Password</label>
-                    <input id="set-user-password" type="password" required placeholder="Password login" class="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#C6D8D8] bg-white text-xs font-medium">
+                    <div class="relative flex items-center">
+                      <input id="set-user-password" type="password" required placeholder="Password login" class="w-full min-h-[42px] pl-3 pr-16 py-2 rounded-xl border border-[#C6D8D8] bg-white text-xs font-medium">
+                      <button type="button" id="btn-toggle-user-pass" aria-label="Tampilkan atau sembunyikan password petugas" class="absolute right-1 min-h-[36px] px-2.5 text-xs font-bold text-[#0E4E4E] hover:underline">
+                        Lihat
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label for="set-user-role" class="block text-[11px] font-bold text-[#122626] mb-1">Role Akses</label>
@@ -1601,11 +1610,13 @@
       const canEdit = role === 'Admin Utama' || role === 'Petugas / Admin';
 
       const dashAdd = document.getElementById('dash-btn-add');
+      const daftarAdd = document.getElementById('btn-daftar-add-item');
       const emptyAdd = document.getElementById('empty-btn-add-item');
       const btnLoan = document.getElementById('btn-toggle-loan-form');
       const btnMaint = document.getElementById('btn-toggle-maint-form');
 
       if (dashAdd) dashAdd.classList.toggle('hidden', !canEdit);
+      if (daftarAdd) daftarAdd.classList.toggle('hidden', !canEdit);
       if (emptyAdd) emptyAdd.classList.toggle('hidden', !canEdit);
       if (btnLoan) btnLoan.classList.toggle('hidden', !canEdit);
       if (btnMaint) btnMaint.classList.toggle('hidden', !canEdit);
@@ -2777,9 +2788,13 @@
           const canDelete = appState.users.length > 1 && !isSelf;
           return `
             <div class="p-3 rounded-xl border border-[#D4E2E2] bg-white flex items-center justify-between gap-2">
-              <div class="min-w-0">
+              <div class="min-w-0 space-y-1">
                 <p class="text-xs font-extrabold text-[#122626] truncate">${escapeHtml(u.nama)} <span class="font-mono text-[#0E4E4E]">(@${escapeHtml(u.username)})</span></p>
-                <p class="text-[11px] font-semibold text-[#4A6363]">Role: ${escapeHtml(u.role)}</p>
+                <div class="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[#4A6363]">
+                  <span>Role: <strong>${escapeHtml(u.role)}</strong></span>
+                  <span>•</span>
+                  <span>Password: <code class="font-mono font-bold text-[#0E4E4E] bg-[#E5EFEF] px-1.5 py-0.5 rounded text-[11px]">${escapeHtml(u.password)}</code></span>
+                </div>
               </div>
               <div class="flex items-center gap-1.5 shrink-0">
                 <button type="button" data-action="edit-user" data-id="${escapeHtml(u.id)}" class="min-h-[36px] px-2.5 py-1 rounded-lg bg-[#E5EFEF] text-[#0E4E4E] text-xs font-bold">
@@ -2914,7 +2929,22 @@
 
       document.getElementById('btn-toggle-pass')?.addEventListener('click', () => {
         const inp = document.getElementById('login-password');
-        if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
+        const btn = document.getElementById('btn-toggle-pass');
+        if (inp) {
+          const isPass = inp.type === 'password';
+          inp.type = isPass ? 'text' : 'password';
+          if (btn) btn.textContent = isPass ? 'Tutup' : 'Lihat';
+        }
+      });
+
+      document.getElementById('btn-toggle-user-pass')?.addEventListener('click', () => {
+        const inp = document.getElementById('set-user-password');
+        const btn = document.getElementById('btn-toggle-user-pass');
+        if (inp) {
+          const isPass = inp.type === 'password';
+          inp.type = isPass ? 'text' : 'password';
+          if (btn) btn.textContent = isPass ? 'Tutup' : 'Lihat';
+        }
       });
 
       document.getElementById('btn-forgot-password')?.addEventListener('click', () => {
@@ -3010,6 +3040,10 @@
             document.getElementById('set-user-nama').value = u.nama;
             document.getElementById('set-user-username').value = u.username;
             document.getElementById('set-user-password').value = u.password;
+            const passInp = document.getElementById('set-user-password');
+            if (passInp) passInp.type = 'text';
+            const toggleBtn = document.getElementById('btn-toggle-user-pass');
+            if (toggleBtn) toggleBtn.textContent = 'Tutup';
             document.getElementById('set-user-role').value = u.role;
             document.getElementById('btn-cancel-edit-user')?.classList.remove('hidden');
           }
@@ -3259,6 +3293,10 @@
         document.getElementById('user-edit-id').value = '';
         document.getElementById('user-form-heading').textContent = 'Tambah Petugas Baru';
         document.getElementById('btn-cancel-edit-user')?.classList.add('hidden');
+        const passInp = document.getElementById('set-user-password');
+        if (passInp) passInp.type = 'password';
+        const toggleBtn = document.getElementById('btn-toggle-user-pass');
+        if (toggleBtn) toggleBtn.textContent = 'Lihat';
         e.target.reset();
         renderSettingsView();
         await pushToGAS('users', editId ? 'update' : 'create', record);
@@ -3269,6 +3307,10 @@
         document.getElementById('user-edit-id').value = '';
         document.getElementById('user-form-heading').textContent = 'Tambah Petugas Baru';
         document.getElementById('btn-cancel-edit-user')?.classList.add('hidden');
+        const passInp = document.getElementById('set-user-password');
+        if (passInp) passInp.type = 'password';
+        const toggleBtn = document.getElementById('btn-toggle-user-pass');
+        if (toggleBtn) toggleBtn.textContent = 'Lihat';
         document.getElementById('settings-user-form')?.reset();
       });
 
