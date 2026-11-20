@@ -4,7 +4,10 @@ referensi tema desain.jpg
 Sintamas-Masjid-Fatkhurrohmah.zip
 sintamas-app/
 index.html.backup_*.html
-qrcode.min.js
 .vscode/
+qrtmp-*.js
 
 tmp_test_login.mjs
+package.json
+package-lock.json
+node_modules/

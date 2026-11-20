@@ -24,6 +24,7 @@
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet">
 
+  <script src="qrcode.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -1389,241 +1390,33 @@
       }
     }
 
-    // ISO/IEC 18004 QR Code generator (Versions 1-3, Byte mode, ECC Level M) for crisp thermal labels.
-    const QR_GF_EXP = new Uint8Array(512);
-    const QR_GF_LOG = new Uint8Array(256);
-    (function initQrGaloisField() {
-      let x = 1;
-      for (let i = 0; i < 255; i++) {
-        QR_GF_EXP[i] = x;
-        QR_GF_LOG[x] = i;
-        x <<= 1;
-        if (x & 0x100) x ^= 0x11d;
-      }
-      for (let i = 255; i < 512; i++) {
-        QR_GF_EXP[i] = QR_GF_EXP[i - 255];
-      }
-    })();
+    // QR Code memakai pustaka qrcode-generator (ISO/IEC 18004, ECC Level M) agar
+    // hasilnya valid dan bisa dipindai aplikasi QR mana pun, bukan pola ngawur.
+    const QR_MATRIX_CACHE = new Map();
 
-    function qrComputeReedSolomon(dataBytes, eccCount) {
-      let gen = [1];
-      for (let i = 0; i < eccCount; i++) {
-        const nextGen = new Array(gen.length + 1).fill(0);
-        const factor = QR_GF_EXP[i];
-        for (let j = 0; j < gen.length; j++) {
-          nextGen[j] ^= gen[j];
-          nextGen[j + 1] ^= gen[j] === 0 ? 0 : QR_GF_EXP[QR_GF_LOG[gen[j]] + QR_GF_LOG[factor]];
-        }
-        gen = nextGen;
+    function getQrMatrix(codeText) {
+      const clean = String(codeText || 'ITEM').trim().toUpperCase() || 'ITEM';
+      const cached = QR_MATRIX_CACHE.get(clean);
+      if (cached) return cached;
+      // typeNumber 0 = otomatis pilih versi terkecil; ECC M tahan kotor/rusak sebagian.
+      const qr = window.qrcode(0, 'M');
+      qr.addData(clean);
+      qr.make();
+      const size = qr.getModuleCount();
+      const modules = [];
+      for (let r = 0; r < size; r++) {
+        const row = new Uint8Array(size);
+        for (let c = 0; c < size; c++) row[c] = qr.isDark(r, c) ? 1 : 0;
+        modules.push(row);
       }
-
-      const rem = new Array(eccCount).fill(0);
-      for (let i = 0; i < dataBytes.length; i++) {
-        const coef = dataBytes[i] ^ rem[0];
-        rem.shift();
-        rem.push(0);
-        if (coef !== 0) {
-          for (let j = 0; j < eccCount; j++) {
-            const gVal = gen[j + 1];
-            if (gVal !== 0) {
-              rem[j] ^= QR_GF_EXP[QR_GF_LOG[gVal] + QR_GF_LOG[coef]];
-            }
-          }
-        }
-      }
-      return rem;
+      const result = { clean, size, modules };
+      if (QR_MATRIX_CACHE.size > 500) QR_MATRIX_CACHE.clear();
+      QR_MATRIX_CACHE.set(clean, result);
+      return result;
     }
 
     function encodeQrMatrix(rawText) {
-      const clean = String(rawText || 'ITEM').trim().toUpperCase();
-      const utf8Bytes = Array.from(new TextEncoder().encode(clean)).slice(0, 42);
-
-      // Single-block ECC Level M specs for Versions 1 to 3.
-      const specs = [
-        { version: 1, size: 21, dataBytes: 16, eccBytes: 10 },
-        { version: 2, size: 25, dataBytes: 28, eccBytes: 16 },
-        { version: 3, size: 29, dataBytes: 44, eccBytes: 26 }
-      ];
-      const spec = specs.find(s => utf8Bytes.length <= s.dataBytes - 2) || specs[2];
-      const { version, size, dataBytes: totalDataCodewords, eccBytes: eccCount } = spec;
-
-      const bits = [];
-      const pushBits = (val, len) => {
-        for (let i = len - 1; i >= 0; i--) {
-          bits.push((val >>> i) & 1);
-        }
-      };
-
-      pushBits(0b0100, 4);
-      pushBits(utf8Bytes.length, 8);
-      for (const b of utf8Bytes) pushBits(b, 8);
-
-      const maxBits = totalDataCodewords * 8;
-      const termLen = Math.min(4, maxBits - bits.length);
-      pushBits(0, termLen);
-      while (bits.length % 8 !== 0) bits.push(0);
-
-      const dataCodewords = [];
-      for (let i = 0; i < bits.length; i += 8) {
-        let byteVal = 0;
-        for (let j = 0; j < 8; j++) byteVal = (byteVal << 1) | bits[i + j];
-        dataCodewords.push(byteVal);
-      }
-
-      const padBytes = [0xec, 0x11];
-      let padIdx = 0;
-      while (dataCodewords.length < totalDataCodewords) {
-        dataCodewords.push(padBytes[padIdx % 2]);
-        padIdx++;
-      }
-
-      const eccCodewords = qrComputeReedSolomon(dataCodewords, eccCount);
-      const allCodewords = dataCodewords.concat(eccCodewords);
-      const allBits = [];
-      for (const cw of allCodewords) {
-        for (let i = 7; i >= 0; i--) allBits.push((cw >>> i) & 1);
-      }
-
-      const modules = Array.from({ length: size }, () => new Uint8Array(size));
-      const isFunction = Array.from({ length: size }, () => new Uint8Array(size));
-
-      const setFunc = (r, c, val) => {
-        if (r >= 0 && r < size && c >= 0 && c < size) {
-          modules[r][c] = val ? 1 : 0;
-          isFunction[r][c] = 1;
-        }
-      };
-
-      const drawFinder = (topR, leftC) => {
-        for (let dr = -1; dr <= 7; dr++) {
-          for (let dc = -1; dc <= 7; dc++) {
-            const inOuter = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6;
-            const inRing = dr === 0 || dr === 6 || dc === 0 || dc === 6;
-            const inCore = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
-            setFunc(topR + dr, leftC + dc, inOuter && (inRing || inCore) ? 1 : 0);
-          }
-        }
-      };
-
-      drawFinder(0, 0);
-      drawFinder(0, size - 7);
-      drawFinder(size - 7, 0);
-
-      if (version >= 2) {
-        const center = size - 7;
-        for (let dr = -2; dr <= 2; dr++) {
-          for (let dc = -2; dc <= 2; dc++) {
-            const dark = Math.abs(dr) === 2 || Math.abs(dc) === 2 || (dr === 0 && dc === 0);
-            setFunc(center + dr, center + dc, dark ? 1 : 0);
-          }
-        }
-      }
-
-      for (let i = 8; i < size - 8; i++) {
-        setFunc(6, i, i % 2 === 0 ? 1 : 0);
-        setFunc(i, 6, i % 2 === 0 ? 1 : 0);
-      }
-
-      setFunc(size - 8, 8, 1);
-
-      for (let i = 0; i < 9; i++) {
-        if (i !== 6) {
-          isFunction[8][i] = 1;
-          isFunction[i][8] = 1;
-        }
-      }
-      for (let i = 0; i < 8; i++) {
-        isFunction[8][size - 1 - i] = 1;
-        if (i < 7) isFunction[size - 1 - i][8] = 1;
-      }
-
-      let bitIdx = 0;
-      let upward = true;
-      for (let right = size - 1; right >= 1; right -= 2) {
-        if (right === 6) right = 5;
-        for (let vert = 0; vert < size; vert++) {
-          const r = upward ? size - 1 - vert : vert;
-          for (let j = 0; j < 2; j++) {
-            const c = right - j;
-            if (!isFunction[r][c]) {
-              modules[r][c] = bitIdx < allBits.length ? allBits[bitIdx++] : 0;
-            }
-          }
-        }
-        upward = !upward;
-      }
-
-      const maskFns = [
-        (r, c) => (r + c) % 2 === 0,
-        (r) => r % 2 === 0,
-        (_, c) => c % 3 === 0,
-        (r, c) => (r + c) % 3 === 0
-      ];
-
-      let bestMask = 0;
-      let lowestPenalty = Infinity;
-      let bestGrid = null;
-
-      maskFns.forEach((fn, maskIdx) => {
-        const candidate = modules.map((row, r) => {
-          const copy = new Uint8Array(row);
-          for (let c = 0; c < size; c++) {
-            if (!isFunction[r][c] && fn(r, c)) {
-              copy[c] ^= 1;
-            }
-          }
-          return copy;
-        });
-
-        let penalty = 0;
-        for (let r = 0; r < size - 1; r++) {
-          for (let c = 0; c < size - 1; c++) {
-            const v = candidate[r][c];
-            if (v === candidate[r][c + 1] && v === candidate[r + 1][c] && v === candidate[r + 1][c + 1]) {
-              penalty += 3;
-            }
-          }
-        }
-        for (let r = 0; r < size; r++) {
-          let run = 1;
-          for (let c = 1; c < size; c++) {
-            if (candidate[r][c] === candidate[r][c - 1]) {
-              run++;
-              if (run === 5) penalty += 3;
-              else if (run > 5) penalty += 1;
-            } else {
-              run = 1;
-            }
-          }
-        }
-
-        if (penalty < lowestPenalty) {
-          lowestPenalty = penalty;
-          bestMask = maskIdx;
-          bestGrid = candidate;
-        }
-      });
-
-      const formatData = (0 << 3) | bestMask;
-      let rem = formatData;
-      for (let i = 0; i < 10; i++) {
-        rem = (rem << 1) ^ (((rem >>> 9) & 1) * 0x537);
-      }
-      const formatBits = ((formatData << 10) | rem) ^ 0x5412;
-
-      for (let i = 0; i < 15; i++) {
-        const bit = (formatBits >>> i) & 1;
-        if (i < 6) bestGrid[8][i] = bit;
-        else if (i === 6) bestGrid[8][7] = bit;
-        else if (i === 7) bestGrid[8][8] = bit;
-        else if (i === 8) bestGrid[7][8] = bit;
-        else bestGrid[14 - i][8] = bit;
-
-        if (i < 7) bestGrid[size - 1 - i][8] = bit;
-        else bestGrid[8][size - 15 + i] = bit;
-      }
-
-      return { clean, size, modules: bestGrid };
+      return getQrMatrix(rawText);
     }
 
     const QR_SVG_CACHE = new Map();
