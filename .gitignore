@@ -1,6 +1,6 @@
-# File yang tidak perlu masuk ke GitHub/Vercel
-*.docx
+# File lokal yang tidak perlu masuk ke GitHub/Vercel
 *.docx
 referensi tema desain.jpg
-konfigurasi vercel.md
-code.js
+Sintamas-Masjid-Fatkhurrohmah.zip
+sintamas-app/
+tmp_test_login.mjs
