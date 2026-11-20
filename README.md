@@ -15,21 +15,12 @@ Sintamas/
 ├── index.html              # Antarmuka aplikasi + logika frontend
 ├── Code.gs                 # Backend Google Apps Script
 ├── vercel.json             # Konfigurasi routing & header izin kamera untuk Vercel
-├── build_sintamas_zip.ps1  # Skrip pembuat arsip ZIP siap unduh
 └── README.md               # Panduan pemasangan, GAS, GitHub, Vercel
 ```
 
-Folder `sintamas-app/`, arsip `Sintamas-Masjid-Fatkhurrohmah.zip`, berkas `.docx`, dan gambar referensi tidak ikut ke GitHub (sudah masuk `.gitignore`).
+Folder berkas `.docx`, dan gambar referensi tidak ikut ke GitHub (sudah masuk `.gitignore`).
 
-## Cara Mengemas Folder Sintamas Menjadi File .zip Siap Unduh
 
-Jalankan skrip berikut di PowerShell dari dalam folder ini:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build_sintamas_zip.ps1
-```
-
-Skrip otomatis menyalin `index.html`, `Code.gs`, `vercel.json`, dan `README.md` ke folder `sintamas-app/`, membuat arsip `Sintamas-Masjid-Fatkhurrohmah.zip`, lalu membersihkan folder staging.
 
 ## Cara Deploy Google Apps Script (Code.gs)
 
