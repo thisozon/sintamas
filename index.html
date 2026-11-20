@@ -1278,6 +1278,51 @@
       }
     }
 
+    const CACHE_KEY = 'sintamas_offline_cache_v2';
+
+    function saveStateToLocalCache() {
+      try {
+        const cache = {
+          items: appState.items,
+          loans: appState.loans,
+          maintenance: appState.maintenance,
+          users: appState.users,
+          settings: appState.settings
+        };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      } catch (_) {}
+    }
+
+    function loadStateFromLocalCache() {
+      try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return false;
+        const cache = JSON.parse(raw);
+        if (Array.isArray(cache.items) && cache.items.length > 0) appState.items = cache.items;
+        if (Array.isArray(cache.loans)) appState.loans = cache.loans;
+        if (Array.isArray(cache.maintenance)) appState.maintenance = cache.maintenance;
+        if (Array.isArray(cache.users) && cache.users.length > 0) appState.users = cache.users;
+        if (cache.settings && typeof cache.settings === 'object') {
+          appState.settings = { ...DEFAULT_SETTINGS, ...cache.settings };
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function extractPayloadData(raw) {
+      if (!raw || typeof raw !== 'object') return {};
+      let target = raw;
+      if (target.data && typeof target.data === 'object') {
+        target = target.data;
+      }
+      if (target.payload && typeof target.payload === 'object') {
+        target = target.payload;
+      }
+      return target;
+    }
+
     function normalizeRecordIds(list, prefix) {
       if (!Array.isArray(list)) return [];
       return list.map((row, idx) => ({
@@ -1302,7 +1347,7 @@
         } catch (_) {
           throw new Error('Respons server GAS bukan format JSON valid');
         }
-        const data = raw && raw.data ? raw.data : raw;
+        const data = extractPayloadData(raw);
 
         if (Array.isArray(data.items)) appState.items = normalizeRecordIds(data.items, 'ITM');
         if (Array.isArray(data.loans)) appState.loans = normalizeRecordIds(data.loans, 'LOAN');
@@ -1314,6 +1359,7 @@
           appState.settings = { ...DEFAULT_SETTINGS, ...data.settings };
         }
 
+        saveStateToLocalCache();
         appState.lastSyncError = null;
         updateSyncUI('synced', 'Tersinkron GAS');
         await applyMosqueBranding();
@@ -1331,6 +1377,7 @@
 
     // Use text/plain so Google Apps Script web apps accept POST without a CORS preflight failure.
     async function pushToGAS(entity, operation, record = null) {
+      saveStateToLocalCache();
       updateSyncUI('loading', 'Menyimpan ke GAS...');
       try {
         const body = JSON.stringify({
@@ -2782,6 +2829,9 @@
 
       await applyMosqueBranding();
       navigateTo('dashboard');
+      if (!appState.isSyncing) {
+        syncFromGAS(true);
+      }
     }
 
     function logoutUser() {
@@ -2812,6 +2862,7 @@
       if (loanInEl) loanInEl.value = today;
       if (maintDateEl) maintDateEl.value = today;
 
+      loadStateFromLocalCache();
       await updatePwaManifestAndIcons();
       await syncFromGAS(true);
 
